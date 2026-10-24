@@ -1,6 +1,6 @@
 /* Service worker de WTFIM: cache-first para la app shell.
    Sube CACHE_VERSION cuando cambien los archivos estáticos. */
-const CACHE = "wtfim-v3";
+const CACHE = "wtfim-v4";
 const ASSETS = [
   "./",
   "index.html",
@@ -29,7 +29,15 @@ self.addEventListener("activate", e => {
 self.addEventListener("fetch", e => {
   // La API de Supabase siempre va a la red (datos vivos)
   if (e.request.url.includes("supabase.co")) return;
+  if (e.request.method !== "GET") return;
+  // Network-first: versión nueva si hay red, caché si estás offline
   e.respondWith(
-    caches.match(e.request).then(hit => hit || fetch(e.request))
+    fetch(e.request)
+      .then(res => {
+        const copy = res.clone();
+        caches.open(CACHE).then(c => c.put(e.request, copy));
+        return res;
+      })
+      .catch(() => caches.match(e.request).then(hit => hit || caches.match("index.html")))
   );
 });
