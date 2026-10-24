@@ -86,8 +86,10 @@ function load() {
       if (s && Array.isArray(s.clients) && Array.isArray(s.payments)) return migrateV1(s);
     }
   } catch (e) { /* datos corruptos -> resembrar */ }
+  // Semilla fresca: savedAt 0 y SIN push remoto, para que la nube siempre la reemplace
   const s = seedData();
-  save(s);
+  s.savedAt = 0;
+  localStorage.setItem(LS_KEY, JSON.stringify(s));
   return s;
 }
 
@@ -744,7 +746,7 @@ function queueRemoteSave() {
   }, 400);
 }
 
-// Al arrancar: jala la nube si es más reciente; si la nube está vacía, sube lo local
+// Al arrancar: jala la nube si es mas reciente; si la nube esta vacia, sube lo local
 async function bootSync() {
   setSync("busy");
   if (!syncEnabled()) { setSync(); return; }
@@ -753,7 +755,8 @@ async function bootSync() {
     if (remote && Array.isArray(remote.payments)) remote = migrateV1(remote);
     if (!remote) {
       await remoteSave(state);
-    } else if ((remote.savedAt || 0) > (state.savedAt || 0)) {
+    } else if ((remote.savedAt || 0) >= (state.savedAt || 0)) {
+      // Remoto gana en empate: semillas y estados viejos (sin savedAt) ceden
       state = remote;
       localStorage.setItem(LS_KEY, JSON.stringify(state));
       render();

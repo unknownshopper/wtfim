@@ -1,6 +1,6 @@
 /* Service worker de WTFIM: cache-first para la app shell.
    Sube CACHE_VERSION cuando cambien los archivos estáticos. */
-const CACHE = "wtfim-v1";
+const CACHE = "wtfim-v3";
 const ASSETS = [
   "./",
   "index.html",
