@@ -674,9 +674,12 @@ document.getElementById("import-file").onchange = e => {
   const r = new FileReader();
   r.onload = () => {
     try {
-      const s = JSON.parse(r.result);
-      if (!Array.isArray(s.clients) || !Array.isArray(s.payments)) throw new Error("formato inválido");
+      let s = JSON.parse(r.result);
+      if (!Array.isArray(s.clients) || (!Array.isArray(s.charges) && !Array.isArray(s.payments)))
+        throw new Error("formato inválido");
       if (!confirm("Esto reemplazará todos los datos actuales. ¿Continuar?")) return;
+      if (!Array.isArray(s.charges)) s = migrateV1(s);
+      if (!Array.isArray(s.services)) s.services = [];
       state = s;
       save(); render();
     } catch (err) {

@@ -6,6 +6,6 @@
    Nota: la anon key está diseñada para ser pública en frontend.
    La protección real la da el RLS (ver README). */
 window.WTFIM_CFG = {
-  url: "https://TU-PROYECTO.supabase.co",
-  key: "TU-ANON-KEY",
+  url: "https://twklocizdsbbdobtlrbd.supabase.co",
+  key: "sb_publishable_FKeQY4f_hP8GaP1gabK2-Q_PzqDMBrv",
 };
