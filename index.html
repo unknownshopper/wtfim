@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WTFIM — Seguimiento de cobros</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-name">WTFIM</span>
+      <span class="brand-sub">seguimiento de cobros</span>
+    </div>
+    <div class="topbar-actions">
+      <span id="sync-status" class="muted" style="align-self:center;font-size:12px;margin-right:6px"></span>
+      <button id="btn-export" class="btn btn-ghost" title="Descargar respaldo JSON">Exportar</button>
+      <label class="btn btn-ghost" title="Cargar respaldo JSON">
+        Importar
+        <input type="file" id="import-file" accept="application/json" hidden>
+      </label>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button class="tab active" data-tab="mensualidades">Mensualidades</button>
+    <button class="tab" data-tab="clientes">Clientes</button>
+  </nav>
+
+  <main id="view" class="view"></main>
+
+  <!-- Modal: formulario de pago -->
+  <div id="modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3 id="modal-title">Nuevo pago</h3>
+        <button id="modal-close" class="btn-icon" aria-label="Cerrar">&times;</button>
+      </div>
+      <form id="payment-form" class="form">
+        <input type="hidden" id="f-id">
+        <div class="form-row">
+          <label>Cliente
+            <select id="f-client" required></select>
+          </label>
+        </div>
+        <div class="form-row form-row-2">
+          <label>Tipo
+            <select id="f-type">
+              <option value="mensualidad">Mensualidad</option>
+              <option value="cargo">Cargo único (proyecto / deuda)</option>
+            </select>
+          </label>
+          <label>Periodo (mes que cubre)
+            <input type="month" id="f-period" required>
+          </label>
+        </div>
+        <div class="form-row" id="row-service">
+          <label>Servicio
+            <select id="f-service"></select>
+          </label>
+        </div>
+        <div class="form-row form-row-2">
+          <label>Monto (MXN)
+            <input type="number" id="f-amount" min="0" step="0.01" required>
+          </label>
+          <label>Estatus
+            <select id="f-status">
+              <option value="pendiente">Pendiente</option>
+              <option value="pagado">Pagado</option>
+            </select>
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Fecha de pago
+            <input type="date" id="f-paiddate">
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Concepto / notas
+            <input type="text" id="f-concept" placeholder="Ej. desarrollo sitio web, anticipo, manejo de redes…">
+          </label>
+        </div>
+        <div class="form-actions">
+          <button type="button" id="btn-delete-payment" class="btn btn-danger" hidden>Eliminar</button>
+          <span class="spacer"></span>
+          <button type="button" id="btn-cancel" class="btn btn-ghost">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Modal: alta rápida de cliente -->
+  <div id="client-modal-backdrop" class="modal-backdrop" hidden>
+    <div class="modal">
+      <div class="modal-head">
+        <h3>Nuevo cliente</h3>
+        <button id="cm-close" class="btn-icon" aria-label="Cerrar">&times;</button>
+      </div>
+      <form id="client-form-modal" class="form">
+        <div class="form-row">
+          <label>Nombre
+            <input type="text" id="cm-name" required placeholder="Nombre del cliente">
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Servicio mensual
+            <input type="text" id="cm-svc" placeholder="Ej. Iguala, Manejo de redes (opcional)">
+          </label>
+        </div>
+        <div class="form-row form-row-2">
+          <label>Monto mensual (MXN)
+            <input type="number" id="cm-amount" min="0" step="0.01" placeholder="0">
+          </label>
+          <label>Día de pago
+            <input type="number" id="cm-day" min="1" max="31" placeholder="10">
+          </label>
+        </div>
+        <div class="form-row">
+          <label>Cobra desde
+            <input type="month" id="cm-start">
+          </label>
+        </div>
+        <div class="form-actions">
+          <span class="spacer"></span>
+          <button type="button" id="cm-cancel" class="btn btn-ghost">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
