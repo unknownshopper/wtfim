@@ -128,12 +128,23 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   font-variant-numeric: tabular-nums;
 }
 .matrix-cell.pagado { background: var(--green-bg); color: var(--green); }
+.matrix-cell.anticipado {
+  background: rgba(52, 211, 153, .07);
+  border-style: dashed;
+  border-color: rgba(52, 211, 153, .35);
+  color: rgba(52, 211, 153, .75);
+}
 .matrix-cell.pendiente { background: var(--amber-bg); color: var(--amber); }
 .matrix-cell.vencido { background: var(--red-bg); color: var(--red); }
 .matrix-cell.empty { color: var(--muted); }
 .matrix-cell.futura { opacity: .5; }
 .matrix-cell.empty:hover { border-color: var(--border); color: var(--text); }
 .matrix td.inactive { color: var(--border); text-align: center; }
+.matrix tfoot tr:first-child td {
+  border-top: 4px solid #67e93f;
+  padding-top: 10px;
+}
+.matrix tfoot td { font-size: 12px; }
 .matrix th.qnav, .matrix td.qarrow { padding: 4px; text-align: center; width: 30px; }
 .q-arrow { padding: 2px 9px; font-weight: 700; font-size: 15px; line-height: 1; }
 
