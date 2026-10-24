@@ -261,3 +261,36 @@ select:focus, input:focus { outline: none; border-color: var(--accent); }
   flex-wrap: wrap;
 }
 .panel table td, .panel table th { padding: 6px 8px; }
+
+/* ---------- Responsive (móvil) ---------- */
+@media (max-width: 720px) {
+  .topbar { padding: 10px 12px; }
+  .brand-name { font-size: 17px; }
+  .brand-sub { display: none; }
+  .topbar-actions .btn { padding: 5px 9px; font-size: 12px; }
+  .tabs { padding: 0 12px; }
+  .tab { padding: 10px 12px; }
+  .view { padding: 12px; }
+
+  .toolbar { gap: 6px; margin-bottom: 10px; }
+  .toolbar .muted { display: none; }          /* hint largo se oculta */
+  .toolbar strong { font-size: 14px; }
+
+  .cards { grid-template-columns: 1fr; gap: 8px; }
+  .card { padding: 12px 14px; }
+  .card .value { font-size: 19px; }
+
+  .matrix th, .matrix td { padding: 5px 6px; }
+  .matrix th.client-col { min-width: 92px; }
+  .matrix td.client-col { font-size: 12px; white-space: normal; }
+  .matrix th.qnav, .matrix td.qarrow { width: 22px; padding: 2px; }
+  .q-arrow { padding: 1px 6px; font-size: 13px; }
+  .matrix-cell { min-width: 46px; padding: 4px 5px; font-size: 11px; }
+  .client-tag { font-size: 9px; padding: 1px 5px; }
+
+  .form-row-2 { flex-direction: column; gap: 6px; }
+  .modal { padding: 16px; }
+  .modal-backdrop { padding: 10px; }
+
+  .footer { font-size: 11px; padding: 14px 10px 22px; }
+}
