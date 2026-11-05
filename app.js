@@ -223,33 +223,41 @@ function renderMensualidades() {
   }).sort((a, b) => a.period.localeCompare(b.period));
 
   const monthTotals = Array(3).fill(0);
-  const mpMens = Array(3).fill(0);   // pendiente de mensualidades (se acumula)
-  const mpCargo = Array(3).fill(0);  // cargos pendientes (solo en su columna vigente)
 
-  // Construye filas con sus métricas para poder ordenarlas
+  // Construye filas con sus métricas para poder ordenarlas.
+  // Cada celda pendiente muestra la DEUDA ACUMULADA de la fila (rojo si arrastra meses vencidos).
   const svcRows = services.map(sv => {
     const c = clientById(sv.clientId);
-    let rowTotal = 0, rowPend = 0;
-    const cells = cols.map((period, i) => {
+    let rowTotal = 0, debt = 0, overdue = 0;
+    // Deuda de meses anteriores al trimestre visible (no se pinta pero sí cuenta)
+    for (const per of eachPeriod(sv.startPeriod, shiftPeriod(qs, -1))) {
+      const ch = mensualidadFor(sv.id, per);
+      if (ch && ch.status === "pagado") continue;
+      debt += ch ? ch.amount : expectedAmount(sv, per);
+      if (per < now) overdue = debt;
+    }
+    const cells = cols.map(period => {
       if (period < sv.startPeriod) return `<td class="inactive">·</td>`;
       const ch = mensualidadFor(sv.id, period);
-      if (ch) {
-        const st = effectiveStatus(ch);
+      if (ch && effectiveStatus(ch) === "pagado") {
         const adv = ch.paidIn && ch.paidIn !== ch.period;
-        if (st === "pagado") {
-          // El dinero se acredita al mes en que realmente cayó (paidIn)
-          const ci = colIndex[ch.paidIn || ch.period];
-          if (ci !== undefined) { monthTotals[ci] += ch.amount; rowTotal += ch.amount; }
-        } else { mpMens[i] += ch.amount; rowPend += ch.amount; }
-        const tip = adv ? `Cobrado en ${periodLabel(ch.paidIn)}` : STATUS_LABEL[st];
-        return `<td class="cell"><span class="matrix-cell ${st}${adv ? " anticipado" : ""} clickable" data-cell="${sv.id}|${period}" title="${tip} · ${fmt(ch.amount)}">${fmt(ch.amount)}</span></td>`;
+        const ci = colIndex[ch.paidIn || ch.period];
+        if (ci !== undefined) { monthTotals[ci] += ch.amount; rowTotal += ch.amount; }
+        const tip = adv ? `Cobrado en ${periodLabel(ch.paidIn)}` : "Pagado";
+        return `<td class="cell"><span class="matrix-cell pagado${adv ? " anticipado" : ""} clickable" data-cell="${sv.id}|${period}" title="${tip} · ${fmt(ch.amount)}">${fmt(ch.amount)}</span></td>`;
       }
-      const exp = expectedAmount(sv, period);
-      mpMens[i] += exp; rowPend += exp;
-      const cls = period <= now ? "pendiente" : "pendiente futura";
-      return `<td class="cell"><span class="matrix-cell ${cls} clickable" data-cell="${sv.id}|${period}" title="Esperada · clic para registrar como pagado">${fmt(exp)}</span></td>`;
+      // Pendiente (real o esperada): muestra la deuda acumulada de la fila
+      const amt = ch ? ch.amount : expectedAmount(sv, period);
+      const isVenc = period < now || overdue > 0;
+      debt += amt;
+      if (period < now) overdue = debt;
+      const cls = isVenc ? "vencido" : (period > now ? "pendiente futura" : "pendiente");
+      const drag = debt > amt ? ` · arrastra ${fmt(debt - amt)}` : "";
+      const tip = ch ? `${STATUS_LABEL[ch.status === "pendiente" && period < now ? "vencido" : ch.status]}${drag}`
+        : `Esperada${drag} · clic para registrar como pagado`;
+      return `<td class="cell"><span class="matrix-cell ${cls} clickable" data-cell="${sv.id}|${period}" title="${tip}">${fmt(debt)}</span></td>`;
     }).join("");
-    return { sv, c, rowTotal, rowPend, cells };
+    return { sv, c, rowTotal, rowPend: debt, cells };
   });
 
   // Ordenamiento por encabezado: nombre (az/za), cobrado (pagados arriba) o deuda (deudores arriba)
@@ -275,31 +283,33 @@ function renderMensualidades() {
   const adeudos = esperado.filter(p => p.status === "pendiente" && p.period < rStart);
   const adeudosTot = adeudos.reduce((s, p) => s + p.amount, 0);
 
-  // Filas de cargos únicos: pagado -> su mes; pendiente -> rueda al mes vigente (o al último del trimestre)
+  // Filas de cargos únicos: pagado -> solo su mes; pendiente -> se repite en rojo desde su mes en adelante
   const cargoRows = cargosQ.map(p => {
     const c = clientById(p.clientId);
     const st = effectiveStatus(p);
-    // Pendiente: se muestra en el mes vigente, limitado al trimestre visible
-    const colPeriod = st === "pagado" ? p.period
-      : (p.period <= now ? (now < qs ? qs : (now > qEnd ? qEnd : now)) : p.period);
     if (st === "pagado") {
       const ci = colIndex[p.paidIn || p.period];
       if (ci !== undefined) monthTotals[ci] += p.amount;
-    } else {
-      const ci = colIndex[colPeriod];
-      if (ci !== undefined && p.period >= qs) mpCargo[ci] += p.amount;
     }
-    const cells = cols.map(period => period !== colPeriod ? `<td class="inactive">·</td>`
-      : `<td class="cell"><span class="matrix-cell ${st} clickable" data-cargo-cell="${p.id}" title="${STATUS_LABEL[st]} · ${fmt(p.amount)}${st !== "pagado" && p.period !== colPeriod ? " · de " + periodLabel(p.period) : ""}">${fmt(p.amount)}</span></td>`).join("");
+    const cells = cols.map(period => {
+      if (st === "pagado") {
+        return period !== (p.paidIn || p.period) ? `<td class="inactive">·</td>`
+          : `<td class="cell"><span class="matrix-cell pagado clickable" data-cargo-cell="${p.id}" title="Pagado · ${fmt(p.amount)}${p.paidIn ? " · cobrado en " + periodLabel(p.paidIn) : ""}">${fmt(p.amount)}</span></td>`;
+      }
+      // Pendiente: persiste en cada mes desde su periodo hasta el fin del trimestre
+      if (period < p.period) return `<td class="inactive">·</td>`;
+      const cls = st === "vencido" ? "vencido" : (p.period > now ? "pendiente futura" : "pendiente");
+      return `<td class="cell"><span class="matrix-cell ${cls} clickable" data-cargo-cell="${p.id}" title="${STATUS_LABEL[st]} · ${fmt(p.amount)} · de ${periodLabel(p.period)}">${fmt(p.amount)}</span></td>`;
+    }).join("");
     return `<tr><td class="client-col">${c ? clientTag(c) : ""} <strong>${esc(p.concept || "Cargo único")}</strong>
-      <div class="muted" style="font-size:11px">cargo único${p.period !== colPeriod ? " · " + periodLabel(p.period) : ""}</div></td>
+      <div class="muted" style="font-size:11px">cargo único · ${periodLabel(p.period)}</div></td>
       <td class="qarrow"></td>${cells}<td class="qarrow"></td><td class="num"><strong>${st === "pagado" ? fmt(p.amount) : "$0"}</strong></td></tr>`;
   }).join("");
 
-  // Por cobrar por columna: mensualidades ACUMULAN hacia adelante; cargo solo en su columna
-  let runPend = 0;
-  const pendFoot = cols.map((p, i) => { runPend += mpMens[i]; return runPend + mpCargo[i]; });
-  const pendTotalQ = runPend + mpCargo.reduce((a, b) => a + b, 0);  // pie: siempre el trimestre
+  // Pie: deuda viva AL CIERRE de cada mes (mensualidades + cargos, incluye arrastre anterior)
+  const esperadoQ = state.charges.concat(virtualPendings(qEnd));
+  const pendFoot = cols.map(col => esperadoQ.filter(p => p.status === "pendiente" && p.period <= col).reduce((s, p) => s + p.amount, 0));
+  const pendTotalQ = pendFoot[2] || 0;
   const porCobrarQ = esperado.filter(p => p.status === "pendiente" && inR(p.period)).reduce((s, p) => s + p.amount, 0);
 
   // FLIP: capturar posición del badge antes de re-render para animarlo al nuevo mes
@@ -314,8 +324,6 @@ function renderMensualidades() {
       ${qs !== quarterStart() ? `<button class="btn btn-ghost btn-small" id="q-today">Ir a ${quarterLabel(quarterStart())}</button>` : ""}
       <span class="spacer"></span>
       <span class="muted">Clic: pagado ↔ pendiente · <strong>Doble clic:</strong> editar / eliminar</span>
-      <button class="btn btn-ghost btn-small" id="btn-new-client">+ Cliente</button>
-      <button class="btn btn-primary btn-small" id="btn-new">+ Cobro</button>
     </div>
     <div class="range-switch"><span class="muted" style="font-size:12px">Tarjetas:</span>
       ${[1, 3, 6].map(n => `<button class="btn btn-ghost btn-small range-btn${ui.cardRange === n ? " active" : ""}" data-range="${n}">${n === 1 ? "Mes" : n === 3 ? "Trimestre" : "6 meses"}</button>`).join("")}
@@ -368,8 +376,6 @@ function renderMensualidades() {
     ui.sort = ui.sort === "paid" ? "pend" : ui.sort === "pend" ? null : "paid";
     render();
   };
-  document.getElementById("btn-new").onclick = () => openPaymentModal(null, {});
-  document.getElementById("btn-new-client").onclick = openClientModal;
 
   let clickTimer = null;
   view.querySelectorAll("[data-cell]").forEach(el => {
@@ -461,6 +467,7 @@ function renderClientes() {
           ${clientTag(c)}
           <input type="text" value="${esc(c.notes || "")}" data-client-field="notes" data-cid="${c.id}" placeholder="Notas…" style="flex:1;min-width:160px">
           <span class="muted">Por cobrar: <strong>${fmt(pendiente)}</strong></span>
+          <button class="btn btn-ghost btn-small" data-add-cargo="${c.id}" title="Cargo único / deuda puntual">+ Cobro</button>
           <label class="muted" style="display:flex;align-items:center;gap:6px">Activo <input type="checkbox" ${c.active ? "checked" : ""} data-client-field="active" data-cid="${c.id}"></label>
           <button class="btn btn-danger btn-small" data-del-client="${c.id}">Eliminar</button>
         </div>
@@ -552,6 +559,10 @@ function renderClientes() {
       state.charges = state.charges.filter(p => p.serviceId !== sv.id);
       save(); render();
     };
+  });
+
+  view.querySelectorAll("[data-add-cargo]").forEach(el => {
+    el.onclick = () => openPaymentModal(null, { clientId: el.dataset.addCargo, kind: "cargo" });
   });
 
   view.querySelectorAll("[data-del-client]").forEach(el => {
