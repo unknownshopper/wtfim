@@ -103,7 +103,7 @@ let state = load();
 let ui = {
   tab: "mensualidades",
   qStart: quarterStart(),
-  cardRange: 3,   // 1 = mes | 3 = trimestre | 6 = semestre (anclado a la vista)
+  cardRange: 1,   // 1 = mes | 3 = trimestre | 6 = semestre (anclado a la vista)
   sort: null,     // name-asc | name-desc | paid | pend | null
   selMonth: null, // mes elegido para las tarjetas cuando cardRange = 1
 };
