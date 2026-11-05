@@ -592,6 +592,7 @@ function openPaymentModal(charge, defaults = {}) {
   document.getElementById("f-paiddate").value = charge?.paidDate || "";
   document.getElementById("f-paidin").value = charge?.paidIn || charge?.period || defaults.period || currentPeriod();
   document.getElementById("f-concept").value = charge?.concept || "";
+  document.getElementById("f-sync-service").checked = false;
   populateServices(charge?.serviceId || defaults.serviceId || "");
   toggleServiceRow();
 
@@ -608,7 +609,9 @@ function populateServices(selectedId = "") {
 }
 
 function toggleServiceRow() {
-  document.getElementById("row-service").hidden = document.getElementById("f-type").value !== "mensualidad";
+  const isMens = document.getElementById("f-type").value === "mensualidad";
+  document.getElementById("row-service").hidden = !isMens;
+  document.getElementById("row-sync-service").hidden = !isMens;
 }
 
 function closeModal() { backdrop.hidden = true; }
@@ -637,6 +640,8 @@ form.onsubmit = e => {
   } else {
     state.charges.push({ id: uid(), createdAt: Date.now(), notes: "", ...data });
   }
+  // Opción: propagar el monto al servicio para los meses futuros
+  if (sv && document.getElementById("f-sync-service").checked) sv.amount = data.amount;
   save(); closeModal(); render();
 };
 
