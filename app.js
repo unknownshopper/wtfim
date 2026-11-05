@@ -103,6 +103,7 @@ let state = load();
 let ui = {
   tab: "mensualidades",
   qStart: quarterStart(),
+  cardRange: 3,   // 1 = mes | 3 = trimestre | 6 = semestre (anclado a la vista)
 };
 
 /* ---------- Helpers ---------- */
@@ -245,9 +246,14 @@ function renderMensualidades() {
       <td class="qarrow"></td>${cells}<td class="qarrow"></td><td class="num"><strong>${fmt(rowTotal)}</strong></td></tr>`;
   }).join("");
 
-  // Tarjetas del trimestre en vista
-  const esperado = state.charges.concat(virtualPendings(qEnd));
-  const cobradoQ = state.charges.filter(p => p.status === "pagado" && colIndex[p.paidIn || p.period] !== undefined).reduce((s, p) => s + p.amount, 0);
+  // Tarjetas: rango elegido (1/3/6 meses) anclado al inicio de la vista
+  const rEnd = shiftPeriod(qs, (ui.cardRange || 3) - 1);
+  const inR = p => p >= qs && p <= rEnd;
+  const rangeLabel = ui.cardRange === 1 ? periodLabel(qs)
+    : ui.cardRange === 6 ? `${periodLabel(qs)} – ${periodLabel(rEnd)}`
+    : quarterLabel(qs);
+  const esperado = state.charges.concat(virtualPendings(rEnd));
+  const cobradoQ = state.charges.filter(p => p.status === "pagado" && inR(p.paidIn || p.period)).reduce((s, p) => s + p.amount, 0);
   const adeudos = esperado.filter(p => p.status === "pendiente" && p.period < qs);
   const adeudosTot = adeudos.reduce((s, p) => s + p.amount, 0);
 
@@ -275,7 +281,8 @@ function renderMensualidades() {
   // Por cobrar por columna: mensualidades ACUMULAN hacia adelante; cargo solo en su columna
   let runPend = 0;
   const pendFoot = cols.map((p, i) => { runPend += mpMens[i]; return runPend + mpCargo[i]; });
-  const porCobrarQ = runPend + mpCargo.reduce((a, b) => a + b, 0);
+  const pendTotalQ = runPend + mpCargo.reduce((a, b) => a + b, 0);  // pie: siempre el trimestre
+  const porCobrarQ = esperado.filter(p => p.status === "pendiente" && inR(p.period)).reduce((s, p) => s + p.amount, 0);
 
   view.innerHTML = `
     <div class="toolbar">
@@ -288,9 +295,12 @@ function renderMensualidades() {
       <button class="btn btn-ghost btn-small" id="btn-new-client">+ Cliente</button>
       <button class="btn btn-primary btn-small" id="btn-new">+ Cobro</button>
     </div>
+    <div class="range-switch"><span class="muted" style="font-size:12px">Tarjetas:</span>
+      ${[1, 3, 6].map(n => `<button class="btn btn-ghost btn-small range-btn${ui.cardRange === n ? " active" : ""}" data-range="${n}">${n === 1 ? "Mes" : n === 3 ? "Trimestre" : "6 meses"}</button>`).join("")}
+    </div>
     <div class="cards">
-      <div class="card green"><div class="label">Cobrado · ${quarterLabel(qs)}</div><div class="value">${fmt(cobradoQ)}</div></div>
-      <div class="card amber"><div class="label">Por cobrar · ${quarterLabel(qs)}</div><div class="value">${fmt(porCobrarQ)}</div></div>
+      <div class="card green"><div class="label">Cobrado · ${rangeLabel}</div><div class="value">${fmt(cobradoQ)}</div></div>
+      <div class="card amber"><div class="label">Por cobrar · ${rangeLabel}</div><div class="value">${fmt(porCobrarQ)}</div></div>
       <div class="card red"><div class="label">Adeudos anteriores</div><div class="value">${fmt(adeudosTot)}</div><div class="hint">${adeudos.length} adeudo(s) arrastrado(s)</div></div>
     </div>
     <div class="table-wrap"><table class="matrix">
@@ -298,7 +308,7 @@ function renderMensualidades() {
       <tbody>${rows + cargoRows || `<tr><td colspan="7" class="empty-state">Sin servicios ni cargos.</td></tr>`}</tbody>
       <tfoot>
         <tr><td class="client-col"><strong>Cobrado</strong></td><td class="qarrow"></td>${monthTotals.map(t => `<td class="cell muted">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td><td class="num"><strong>${fmt(monthTotals.reduce((a, b) => a + b, 0))}</strong></td></tr>
-        <tr><td class="client-col"><strong>Por cobrar</strong></td><td class="qarrow"></td>${pendFoot.map(t => `<td class="cell muted">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td><td class="num" style="color:var(--amber)"><strong>${fmt(porCobrarQ)}</strong></td></tr>
+        <tr><td class="client-col"><strong>Por cobrar</strong></td><td class="qarrow"></td>${pendFoot.map(t => `<td class="cell muted">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td><td class="num" style="color:var(--amber)"><strong>${fmt(pendTotalQ)}</strong></td></tr>
       </tfoot>
     </table></div>
   `;
@@ -308,6 +318,7 @@ function renderMensualidades() {
   document.getElementById("year-prev").onclick = () => { ui.qStart = shiftPeriod(qs, -12); render(); };
   document.getElementById("year-next").onclick = () => { ui.qStart = shiftPeriod(qs, 12); render(); };
   document.getElementById("q-today")?.addEventListener("click", () => { ui.qStart = quarterStart(); render(); });
+  view.querySelectorAll(".range-btn").forEach(b => b.onclick = () => { ui.cardRange = +b.dataset.range; render(); });
   document.getElementById("btn-new").onclick = () => openPaymentModal(null, {});
   document.getElementById("btn-new-client").onclick = openClientModal;
 
