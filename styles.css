@@ -147,6 +147,21 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   padding-top: 10px;
 }
 .matrix tfoot td { font-size: 12px; }
+
+/* Pie con vida: cobrado verde / por cobrar ámbar + pop escalonado */
+.matrix tfoot tr.foot-cob td { color: var(--green); }
+.matrix tfoot tr.foot-pen td { color: var(--amber); }
+.matrix tfoot tr.foot-cob td.client-col, .matrix tfoot tr.foot-pen td.client-col { font-size: 13px; letter-spacing: .02em; }
+.matrix tfoot td.foot-val { font-weight: 700; font-size: 13px; text-align: center; animation: footPop .4s cubic-bezier(.22,.9,.3,1) both; }
+.matrix tfoot td.foot-val:nth-child(3) { animation-delay: .05s; }
+.matrix tfoot td.foot-val:nth-child(4) { animation-delay: .12s; }
+.matrix tfoot td.foot-val:nth-child(5) { animation-delay: .19s; }
+.matrix tfoot td.foot-total { font-size: 15px; animation: footPop .45s cubic-bezier(.22,.9,.3,1) .26s both; }
+.matrix tfoot tr.foot-pen { box-shadow: inset 0 1px 0 rgba(255,255,255,.04); }
+@keyframes footPop {
+  from { opacity: 0; transform: translateY(8px) scale(.92); }
+  to   { opacity: 1; transform: none; }
+}
 .matrix th.sortable { cursor: pointer; user-select: none; }
 .matrix th.sortable:hover { color: var(--text); }
 .matrix th.month-th { cursor: pointer; user-select: none; }
