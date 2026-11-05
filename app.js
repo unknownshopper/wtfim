@@ -128,8 +128,9 @@ function esc(s) {
   return String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 }
 
-function clientTag(c) {
-  return `<span class="client-tag" style="background:${esc(c.color)}">${esc(c.name)}</span>`;
+function clientTag(c, cls = "") {
+  const style = cls ? "" : ` style="background:${esc(c.color)}"`;
+  return `<span class="client-tag ${cls}"${style}>${esc(c.name)}</span>`;
 }
 
 const serviceById = id => state.services.find(s => s.id === id);
@@ -217,9 +218,12 @@ function renderMensualidades() {
 
   const services = state.services.filter(sv => sv.active && clientById(sv.clientId)?.active);
   // Cargos del trimestre: pagados en su mes; pendientes de CUALQUIER mes pasado ruedan al vigente
+  // Cargos visibles: su celda (mes de cobro / vigente / propio) debe caer en ESTE trimestre
   const cargosQ = state.charges.filter(p => {
-    if (p.kind !== "cargo" || p.period > qEnd) return false;
-    return effectiveStatus(p) === "pagado" ? p.period >= qs : true;
+    if (p.kind !== "cargo") return false;
+    const st = effectiveStatus(p);
+    const show = st === "pagado" ? (p.paidIn || p.period) : (p.period <= now ? now : p.period);
+    return (show >= qs && show <= qEnd) || (st !== "pagado" && p.period >= qs && p.period <= qEnd);
   }).sort((a, b) => a.period.localeCompare(b.period));
 
   const monthTotals = Array(3).fill(0);
@@ -246,30 +250,20 @@ function renderMensualidades() {
         const tip = adv ? `Cobrado en ${periodLabel(ch.paidIn)}` : "Pagado";
         return `<td class="cell"><span class="matrix-cell pagado${adv ? " anticipado" : ""} clickable" data-cell="${sv.id}|${period}" title="${tip} · ${fmt(ch.amount)}">${fmt(ch.amount)}</span></td>`;
       }
-      // Pendiente (real o esperada): muestra la deuda acumulada de la fila
+      // Pendiente (real o esperada): monto fijo del mes; el arrastre solo se indica en el tooltip
       const amt = ch ? ch.amount : expectedAmount(sv, period);
-      const isVenc = period < now || overdue > 0;
+      const carry = debt;
       debt += amt;
       if (period < now) overdue = debt;
-      const cls = isVenc ? "vencido" : (period > now ? "pendiente futura" : "pendiente");
-      const drag = debt > amt ? ` · arrastra ${fmt(debt - amt)}` : "";
+      const cls = period < now ? "vencido" : (period > now ? "pendiente futura" : "pendiente");
+      const drag = carry > 0 ? ` · arrastra ${fmt(carry)}` : "";
       const tip = ch ? `${STATUS_LABEL[ch.status === "pendiente" && period < now ? "vencido" : ch.status]}${drag}`
         : `Esperada${drag} · clic para registrar como pagado`;
-      return `<td class="cell"><span class="matrix-cell ${cls} clickable" data-cell="${sv.id}|${period}" title="${tip}">${fmt(debt)}</span></td>`;
+      return `<td class="cell"><span class="matrix-cell ${cls} clickable" data-cell="${sv.id}|${period}" title="${tip}">${fmt(amt)}</span></td>`;
     }).join("");
     return { sv, c, rowTotal, rowPend: debt, cells };
   });
 
-  // Ordenamiento por encabezado: nombre (az/za), cobrado (pagados arriba) o deuda (deudores arriba)
-  if (ui.sort === "name-asc") svcRows.sort((a, b) => (a.sv.name + (a.c?.name || "")).localeCompare(b.sv.name + (b.c?.name || ""), "es"));
-  else if (ui.sort === "name-desc") svcRows.sort((a, b) => (b.sv.name + (b.c?.name || "")).localeCompare(a.sv.name + (a.c?.name || ""), "es"));
-  else if (ui.sort === "paid") svcRows.sort((a, b) => b.rowTotal - a.rowTotal);
-  else if (ui.sort === "pend") svcRows.sort((a, b) => b.rowPend - a.rowPend);
-
-  const rows = svcRows.map(({ sv, c, rowTotal, cells }) =>
-    `<tr><td class="client-col">${c ? clientTag(c) : ""} <strong>${esc(sv.name)}</strong></td>
-      <td class="qarrow"></td>${cells}<td class="qarrow"></td><td class="num"><strong>${fmt(rowTotal)}</strong></td></tr>`
-  ).join("");
 
   // Tarjetas: rango elegido (mes seleccionado / trimestre / semestre)
   const rStart = ui.cardRange === 1 ? ui.selMonth : qs;
@@ -283,33 +277,55 @@ function renderMensualidades() {
   const adeudos = esperado.filter(p => p.status === "pendiente" && p.period < rStart);
   const adeudosTot = adeudos.reduce((s, p) => s + p.amount, 0);
 
-  // Filas de cargos únicos: pagado -> solo su mes; pendiente -> se repite en rojo desde su mes en adelante
-  const cargoRows = cargosQ.map(p => {
+  // Filas de cargos únicos: pagado -> su mes de cobro; pendiente -> su mes, o rueda al vigente si ya venció
+  const cargoObjs = cargosQ.map(p => {
     const c = clientById(p.clientId);
     const st = effectiveStatus(p);
+    // Pendiente vencido: se muestra en el MES VIGENTE real (no en trimestres futuros)
+    const colPeriod = st === "pagado" ? (p.paidIn || p.period)
+      : (p.period <= now ? now : p.period);
     if (st === "pagado") {
-      const ci = colIndex[p.paidIn || p.period];
+      const ci = colIndex[colPeriod];
       if (ci !== undefined) monthTotals[ci] += p.amount;
     }
     const cells = cols.map(period => {
-      if (st === "pagado") {
-        return period !== (p.paidIn || p.period) ? `<td class="inactive">·</td>`
-          : `<td class="cell"><span class="matrix-cell pagado clickable" data-cargo-cell="${p.id}" title="Pagado · ${fmt(p.amount)}${p.paidIn ? " · cobrado en " + periodLabel(p.paidIn) : ""}">${fmt(p.amount)}</span></td>`;
+      // Origen de la deuda: se queda marcado tenue en su mes cuando rueda al vigente
+      if (st !== "pagado" && period === p.period && period !== colPeriod) {
+        return `<td class="cell"><span class="matrix-cell pendiente origen" data-cargo-cell="${p.id}" title="Deuda iniciada en ${periodLabel(p.period)} · ${fmt(p.amount)}">${fmt(p.amount)}</span></td>`;
       }
-      // Pendiente: persiste en cada mes desde su periodo hasta el fin del trimestre
-      if (period < p.period) return `<td class="inactive">·</td>`;
-      const cls = st === "vencido" ? "vencido" : (p.period > now ? "pendiente futura" : "pendiente");
-      return `<td class="cell"><span class="matrix-cell ${cls} clickable" data-cargo-cell="${p.id}" title="${STATUS_LABEL[st]} · ${fmt(p.amount)} · de ${periodLabel(p.period)}">${fmt(p.amount)}</span></td>`;
+      if (period !== colPeriod) return `<td class="inactive">·</td>`;
+      const cls = st === "pagado" ? "pagado" : st === "vencido" ? "vencido" : (colPeriod > now ? "pendiente futura" : "pendiente");
+      const tip = `${STATUS_LABEL[st]} · ${fmt(p.amount)}${p.period !== colPeriod ? " · de " + periodLabel(p.period) : ""}`;
+      return `<td class="cell"><span class="matrix-cell ${cls} clickable" data-cargo-cell="${p.id}" title="${tip}">${fmt(p.amount)}</span></td>`;
     }).join("");
-    return `<tr><td class="client-col">${c ? clientTag(c) : ""} <strong>${esc(p.concept || "Cargo único")}</strong>
+    return { p, c, st, html: `<tr><td class="client-col">${c ? clientTag(c, "ct-cargo") : ""} <strong>${esc(p.concept || "Cargo único")}</strong>
       <div class="muted" style="font-size:11px">cargo único · ${periodLabel(p.period)}</div></td>
-      <td class="qarrow"></td>${cells}<td class="qarrow"></td><td class="num"><strong>${st === "pagado" ? fmt(p.amount) : "$0"}</strong></td></tr>`;
-  }).join("");
+      <td class="qarrow"></td>${cells}<td class="qarrow"></td></tr>` };
+  });
 
-  // Pie: deuda viva AL CIERRE de cada mes (mensualidades + cargos, incluye arrastre anterior)
+  // Filas unificadas (mensualidades + cargos) con orden por encabezado:
+  // nombre A→Z/Z→A, por empresa, por tipo, cobrados arriba, deudores arriba
+  const displayRows = [
+    ...svcRows.map(r => ({ kind: "mensualidad", cn: r.c?.name || "", nm: r.sv.name,
+      rowTotal: r.rowTotal, rowPend: r.rowPend,
+      html: `<tr><td class="client-col">${r.c ? clientTag(r.c, "ct-mens") : ""} <strong>${esc(r.sv.name)}</strong></td>
+        <td class="qarrow"></td>${r.cells}<td class="qarrow"></td></tr>` })),
+    ...cargoObjs.map(o => ({ kind: "cargo", cn: o.c?.name || "", nm: o.p.concept || "Cargo único",
+      rowTotal: o.st === "pagado" ? o.p.amount : 0, rowPend: o.st === "pagado" ? 0 : o.p.amount, html: o.html })),
+  ];
+  const byName = (a, b) => a.nm.localeCompare(b.nm, "es");
+  const mFirst = (a, b) => a.kind === b.kind ? byName(a, b) : a.kind === "mensualidad" ? -1 : 1;
+  if (ui.sort === "name-asc") displayRows.sort(byName);
+  else if (ui.sort === "name-desc") displayRows.sort((a, b) => b.nm.localeCompare(a.nm, "es"));
+  else if (ui.sort === "empresa") displayRows.sort((a, b) => a.cn.localeCompare(b.cn, "es") || mFirst(a, b));
+  else if (ui.sort === "tipo") displayRows.sort(mFirst);
+  else if (ui.sort === "paid") displayRows.sort((a, b) => b.rowTotal - a.rowTotal);
+  else if (ui.sort === "pend") displayRows.sort((a, b) => b.rowPend - a.rowPend);
+  const rows = displayRows.map(r => r.html).join("");
+
+  // Pie: "Por cobrar" por columna = lo que le toca a ESE mes (el arrastre ya se ve en las celdas rojas).
   const esperadoQ = state.charges.concat(virtualPendings(qEnd));
-  const pendFoot = cols.map(col => esperadoQ.filter(p => p.status === "pendiente" && p.period <= col).reduce((s, p) => s + p.amount, 0));
-  const pendTotalQ = pendFoot[2] || 0;
+  const pendFoot = cols.map(col => esperadoQ.filter(p => p.status === "pendiente" && p.period === col).reduce((s, p) => s + p.amount, 0));
   const porCobrarQ = esperado.filter(p => p.status === "pendiente" && inR(p.period)).reduce((s, p) => s + p.amount, 0);
 
   // FLIP: capturar posición del badge antes de re-render para animarlo al nuevo mes
@@ -334,11 +350,11 @@ function renderMensualidades() {
       <div class="card red"><div class="label">Adeudos anteriores</div><div class="value">${fmt(adeudosTot)}</div><div class="hint">${adeudos.length} adeudo(s) arrastrado(s)</div></div>
     </div>
     <div class="table-wrap"><table class="matrix">
-      <thead><tr><th class="client-col sortable" id="sort-name" title="Ordenar por nombre">Servicio / cargo ${ui.sort === "name-asc" ? "▲" : ui.sort === "name-desc" ? "▼" : ""}</th><th class="qnav"><button class="btn btn-ghost q-arrow" id="q-prev" title="Trimestre anterior">‹</button></th>${cols.map(p => `<th class="month-th${p < now ? " past" : ""}" data-month="${p}" style="text-align:center" title="Ver tarjetas de ${periodLabel(p)}">${MONTHS[monthOf(p) - 1]}${ui.cardRange === 1 && p === ui.selMonth ? `<span class="month-badge"></span>` : ""}</th>`).join("")}<th class="qnav"><button class="btn btn-ghost q-arrow" id="q-next" title="Siguiente trimestre">›</button></th><th class="num sortable" id="sort-total" title="Ordenar por cobrado / adeudo">Cobrado ${ui.sort === "paid" ? "▼" : ui.sort === "pend" ? "▲" : ""}</th></tr></thead>
-      <tbody>${rows + cargoRows || `<tr><td colspan="7" class="empty-state">Sin servicios ni cargos.</td></tr>`}</tbody>
+      <thead><tr><th class="client-col sortable" id="sort-name"      title="Ordenar: nombre / empresa / tipo / deudores / cobrados">Servicio / cargo ${{ "name-asc": "▲", "name-desc": "▼", empresa: "· empresa", tipo: "· tipo", pend: "· deudores", paid: "· cobrados" }[ui.sort] || ""}</th><th class="qnav"><button class="btn btn-ghost q-arrow" id="q-prev" title="Trimestre anterior">‹</button></th>${cols.map(p => `<th class="month-th${p < now ? " past" : ""}" data-month="${p}" style="text-align:center" title="Ver tarjetas de ${periodLabel(p)}">${MONTHS[monthOf(p) - 1]}${ui.cardRange === 1 && p === ui.selMonth ? `<span class="month-badge"></span>` : ""}</th>`).join("")}<th class="qnav"><button class="btn btn-ghost q-arrow" id="q-next" title="Siguiente trimestre">›</button></th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="6" class="empty-state">Sin servicios ni cargos.</td></tr>`}</tbody>
       <tfoot>
-        <tr class="foot-cob"><td class="client-col"><strong>Cobrado</strong></td><td class="qarrow"></td>${monthTotals.map(t => `<td class="cell foot-val">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td><td class="num foot-total"><strong>${fmt(monthTotals.reduce((a, b) => a + b, 0))}</strong></td></tr>
-        <tr class="foot-pen"><td class="client-col"><strong>Por cobrar</strong></td><td class="qarrow"></td>${pendFoot.map(t => `<td class="cell foot-val">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td><td class="num foot-total"><strong>${fmt(pendTotalQ)}</strong></td></tr>
+        <tr class="foot-cob"><td class="client-col"><strong>Cobrado</strong></td><td class="qarrow"></td>${monthTotals.map((t, i) => `<td class="cell foot-val${ui.cardRange === 1 && cols[i] === ui.selMonth ? " sel" : ""}">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td></tr>
+        <tr class="foot-pen"><td class="client-col"><strong>Por cobrar</strong></td><td class="qarrow"></td>${pendFoot.map((t, i) => `<td class="cell foot-val${ui.cardRange === 1 && cols[i] === ui.selMonth ? " sel" : ""}">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td></tr>
       </tfoot>
     </table></div>
   `;
@@ -367,13 +383,10 @@ function renderMensualidades() {
   });
 
   view.querySelectorAll(".range-btn").forEach(b => b.onclick = () => { ui.cardRange = +b.dataset.range; render(); });
-  // Orden: clic en "Servicio / cargo" cicla A→Z / Z→A / normal; en "Cobrado" cicla pagados↑ / deudores↑ / normal
+  // Orden: clic en "Servicio / cargo" cicla A→Z / Z→A / empresa / tipo / deudores / cobrados / normal
+  const SORT_CYCLE = { "name-asc": "name-desc", "name-desc": "empresa", empresa: "tipo", tipo: "pend", pend: "paid", paid: null };
   document.getElementById("sort-name").onclick = () => {
-    ui.sort = ui.sort === "name-asc" ? "name-desc" : ui.sort === "name-desc" ? null : "name-asc";
-    render();
-  };
-  document.getElementById("sort-total").onclick = () => {
-    ui.sort = ui.sort === "paid" ? "pend" : ui.sort === "pend" ? null : "paid";
+    ui.sort = SORT_CYCLE[ui.sort] ?? "name-asc";
     render();
   };
 
@@ -461,13 +474,14 @@ function renderClientes() {
     <div class="section-title">Clientes y sus servicios mensuales</div>
     ${state.clients.map(c => {
       const svcs = state.services.filter(s => s.clientId === c.id);
+      const cargosPend = state.charges.filter(p => p.clientId === c.id && p.kind === "cargo" && p.status === "pendiente")
+        .sort((a, b) => a.period.localeCompare(b.period));
       const pendiente = state.charges.filter(p => p.clientId === c.id && p.status === "pendiente").reduce((s, p) => s + p.amount, 0);
       return `<div class="panel">
         <div class="panel-head">
           ${clientTag(c)}
           <input type="text" value="${esc(c.notes || "")}" data-client-field="notes" data-cid="${c.id}" placeholder="Notas…" style="flex:1;min-width:160px">
           <span class="muted">Por cobrar: <strong>${fmt(pendiente)}</strong></span>
-          <button class="btn btn-ghost btn-small" data-add-cargo="${c.id}" title="Cargo único / deuda puntual">+ Cobro</button>
           <label class="muted" style="display:flex;align-items:center;gap:6px">Activo <input type="checkbox" ${c.active ? "checked" : ""} data-client-field="active" data-cid="${c.id}"></label>
           <button class="btn btn-danger btn-small" data-del-client="${c.id}">Eliminar</button>
         </div>
@@ -480,17 +494,23 @@ function renderClientes() {
               <td><input type="number" min="1" max="31" value="${sv.payDay || ""}" data-svc-field="payDay" data-sid="${sv.id}" style="width:64px"></td>
               <td><input type="month" value="${sv.startPeriod}" data-svc-field="startPeriod" data-sid="${sv.id}"></td>
               <td><input type="checkbox" ${sv.active ? "checked" : ""} data-svc-field="active" data-sid="${sv.id}"></td>
-              <td><button class="btn btn-danger btn-small" data-del-svc="${sv.id}">Quitar</button></td>
+              <td style="white-space:nowrap"><button class="btn btn-ghost btn-small" data-conv-svc="${sv.id}" title="Convertir a pago único (deja de repetirse)">→ único</button>
+              <button class="btn btn-danger btn-small" data-del-svc="${sv.id}">Quitar</button></td>
             </tr>`).join("")}
             <tr>
-              <td><input type="text" id="ns-name-${c.id}" placeholder="+ nuevo servicio (ej. Manejo de redes)" style="width:220px"></td>
+              <td><input type="text" id="ns-name-${c.id}" placeholder="+ nuevo cobro o servicio (ej. Manejo de redes)" style="width:220px"></td>
               <td><input type="number" id="ns-amount-${c.id}" min="0" step="0.01" placeholder="0" style="width:110px"></td>
               <td><input type="number" id="ns-day-${c.id}" min="1" max="31" placeholder="10" style="width:64px"></td>
               <td><input type="month" id="ns-start-${c.id}" value="${currentPeriod()}"></td>
-              <td colspan="2"><button class="btn btn-ghost btn-small" data-add-svc="${c.id}">Agregar servicio</button></td>
+              <td><label class="muted" style="display:flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap" title="Marcado: pago único. Sin marcar: mensualidad"><input type="checkbox" id="ns-unico-${c.id}"> pago único</label></td>
+              <td><button class="btn btn-ghost btn-small" data-add-svc="${c.id}">Agregar</button></td>
             </tr>
           </tbody>
         </table>
+        ${cargosPend.length ? `<div class="cargo-list"><span class="muted" style="font-size:11px">CARGOS PENDIENTES (clic para editar)</span>
+          ${cargosPend.map(p => `<button class="cargo-chip" data-edit-cargo="${p.id}" title="${STATUS_LABEL[effectiveStatus(p)]} · clic para editar">
+            ${esc(p.concept || "Cargo único")} · ${periodLabel(p.period)} · <strong>${fmt(p.amount)}</strong></button>`).join("")}
+        </div>` : ""}
       </div>`;
     }).join("")}
   `;
@@ -538,13 +558,47 @@ function renderClientes() {
       const nameEl = document.getElementById(`ns-name-${cid}`);
       const name = nameEl.value.trim();
       if (!name) { nameEl.focus(); return; }
-      state.services.push({
-        id: uid(), clientId: cid, name,
-        amount: parseFloat(document.getElementById(`ns-amount-${cid}`).value) || 0,
-        payDay: parseInt(document.getElementById(`ns-day-${cid}`).value, 10) || null,
-        startPeriod: document.getElementById(`ns-start-${cid}`).value || currentPeriod(),
-        active: true,
+      const amount = parseFloat(document.getElementById(`ns-amount-${cid}`).value) || 0;
+      const period = document.getElementById(`ns-start-${cid}`).value || currentPeriod();
+      if (document.getElementById(`ns-unico-${cid}`).checked) {
+        // Pago único: cargo de una sola vez en el periodo elegido
+        state.charges.push({
+          id: uid(), clientId: cid, serviceId: null, kind: "cargo", period,
+          concept: name, amount, status: "pendiente", paidDate: "", notes: "", createdAt: Date.now(),
+        });
+      } else {
+        // Mensualidad: servicio que se repite desde el periodo elegido
+        state.services.push({
+          id: uid(), clientId: cid, name, amount,
+          payDay: parseInt(document.getElementById(`ns-day-${cid}`).value, 10) || null,
+          startPeriod: period, active: true,
+        });
+      }
+      save(); render();
+    };
+  });
+
+  // Convertir servicio mensual -> cargo único: pagados pasan a historial, se crea UN solo pendiente
+  view.querySelectorAll("[data-conv-svc]").forEach(el => {
+    el.onclick = () => {
+      const sv = serviceById(el.dataset.convSvc);
+      if (!sv) return;
+      if (!confirm(`Convertir "${sv.name}" en pago único? Dejará de repetirse cada mes.`)) return;
+      const now = currentPeriod();
+      // cobros pagados quedan como cargos históricos visibles en su mes
+      state.charges.forEach(p => { if (p.serviceId === sv.id && p.status === "pagado") p.kind = "cargo"; });
+      // pendientes/esperados se borran y se reemplazan por un solo cargo en el primer mes sin pagar
+      state.charges = state.charges.filter(p => !(p.serviceId === sv.id && p.status !== "pagado"));
+      const firstUnpaid = eachPeriod(sv.startPeriod, now).find(per =>
+        !state.charges.some(p => p.clientId === sv.clientId && p.concept === sv.name && p.period === per && p.status === "pagado")
+        && !state.charges.some(p => p.serviceId === sv.id && p.period === per));
+      const period = firstUnpaid || now;
+      state.charges.push({
+        id: uid(), clientId: sv.clientId, serviceId: null, kind: "cargo", period,
+        concept: sv.name, amount: expectedAmount(sv, period),
+        status: "pendiente", paidDate: "", notes: "", createdAt: Date.now(),
       });
+      state.services = state.services.filter(s => s.id !== sv.id);
       save(); render();
     };
   });
@@ -561,9 +615,13 @@ function renderClientes() {
     };
   });
 
-  view.querySelectorAll("[data-add-cargo]").forEach(el => {
-    el.onclick = () => openPaymentModal(null, { clientId: el.dataset.addCargo, kind: "cargo" });
+  view.querySelectorAll("[data-edit-cargo]").forEach(el => {
+    el.onclick = () => {
+      const p = state.charges.find(x => x.id === el.dataset.editCargo);
+      if (p) openPaymentModal(p);
+    };
   });
+
 
   view.querySelectorAll("[data-del-client]").forEach(el => {
     el.onclick = () => {
@@ -613,7 +671,7 @@ function openPaymentModal(charge, defaults = {}) {
 function populateServices(selectedId = "") {
   const cid = document.getElementById("f-client").value;
   const sel = document.getElementById("f-service");
-  sel.innerHTML = `<option value="">— sin servicio —</option>` +
+  sel.innerHTML = `<option value="">— crear servicio nuevo (usa el concepto) —</option>` +
     state.services.filter(s => s.clientId === cid)
       .map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join("");
   sel.value = selectedId;
@@ -623,6 +681,8 @@ function toggleServiceRow() {
   const isMens = document.getElementById("f-type").value === "mensualidad";
   document.getElementById("row-service").hidden = !isMens;
   document.getElementById("row-sync-service").hidden = !isMens;
+  // Fechas de pago solo importan si el cobro ya está pagado
+  document.getElementById("row-paid").hidden = document.getElementById("f-status").value !== "pagado";
 }
 
 function closeModal() { backdrop.hidden = true; }
@@ -631,18 +691,31 @@ form.onsubmit = e => {
   e.preventDefault();
   const id = document.getElementById("f-id").value;
   const kind = document.getElementById("f-type").value;
-  const serviceId = kind === "mensualidad" ? (document.getElementById("f-service").value || null) : null;
-  const sv = serviceId ? serviceById(serviceId) : null;
+  let serviceId = kind === "mensualidad" ? (document.getElementById("f-service").value || null) : null;
+  let sv = serviceId ? serviceById(serviceId) : null;
   const period = document.getElementById("f-period").value;
+  const clientId = document.getElementById("f-client").value;
+  const amount = parseFloat(document.getElementById("f-amount").value) || 0;
+  const rawConcept = document.getElementById("f-concept").value.trim();
+  // Mensualidad sin servicio elegido: crear la igualita sola con el concepto como nombre
+  if (kind === "mensualidad" && !sv) {
+    sv = state.services.find(s => s.clientId === clientId && s.name.toLowerCase() === (rawConcept || "Iguala").toLowerCase());
+    if (!sv) {
+      sv = { id: uid(), clientId, name: rawConcept || "Iguala", amount, payDay: null, startPeriod: period, active: true };
+      state.services.push(sv);
+    }
+    serviceId = sv.id;
+  }
   const paidIn = document.getElementById("f-paidin").value || period;
+  const isPaid = document.getElementById("f-status").value === "pagado";
   const data = {
-    clientId: document.getElementById("f-client").value,
+    clientId,
     serviceId, kind, period,
-    amount: parseFloat(document.getElementById("f-amount").value) || 0,
+    amount,
     status: document.getElementById("f-status").value,
-    paidDate: document.getElementById("f-paiddate").value,
-    paidIn: paidIn !== period ? paidIn : null,
-    concept: document.getElementById("f-concept").value.trim() || (sv ? `${sv.name} ${periodLabel(period)}` : ""),
+    paidDate: isPaid ? document.getElementById("f-paiddate").value : "",
+    paidIn: isPaid && paidIn !== period ? paidIn : null,
+    concept: rawConcept || (sv ? `${sv.name} ${periodLabel(period)}` : ""),
   };
   if (data.status === "pagado" && !data.paidDate) data.paidDate = new Date().toISOString().slice(0, 10);
   if (id) {
@@ -722,6 +795,7 @@ cBackdrop.onclick = e => { if (e.target === cBackdrop) closeClientModal(); };
 
 // Al cambiar cliente/tipo/servicio: repoblar servicios y prellenar monto
 document.getElementById("f-type").onchange = () => { toggleServiceRow(); prefillAmount(); };
+document.getElementById("f-status").onchange = toggleServiceRow;
 document.getElementById("f-client").onchange = () => { populateServices(); prefillAmount(); };
 document.getElementById("f-service").onchange = prefillAmount;
 function prefillAmount() {
