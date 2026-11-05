@@ -104,6 +104,8 @@ let ui = {
   tab: "mensualidades",
   qStart: quarterStart(),
   cardRange: 3,   // 1 = mes | 3 = trimestre | 6 = semestre (anclado a la vista)
+  sort: null,     // name-asc | name-desc | paid | pend | null
+  selMonth: null, // mes elegido para las tarjetas cuando cardRange = 1
 };
 
 /* ---------- Helpers ---------- */
@@ -208,6 +210,11 @@ function renderMensualidades() {
   const qEnd = shiftPeriod(qs, 2);
   const cols = [qs, shiftPeriod(qs, 1), qEnd];
   const colIndex = Object.fromEntries(cols.map((p, i) => [p, i]));
+  // Mes seleccionado para tarjetas: si el trimestre contiene el mes vigente, no bajar de ahí
+  if (!ui.selMonth || ui.selMonth < qs || ui.selMonth > qEnd
+      || (now >= qs && now <= qEnd && ui.selMonth < now)) {
+    ui.selMonth = (now >= qs && now <= qEnd) ? now : qs;
+  }
 
   const services = state.services.filter(sv => sv.active && clientById(sv.clientId)?.active);
   // Cargos del trimestre: pagados en su mes; pendientes de CUALQUIER mes pasado ruedan al vigente
@@ -220,9 +227,10 @@ function renderMensualidades() {
   const mpMens = Array(3).fill(0);   // pendiente de mensualidades (se acumula)
   const mpCargo = Array(3).fill(0);  // cargos pendientes (solo en su columna vigente)
 
-  const rows = services.map(sv => {
+  // Construye filas con sus métricas para poder ordenarlas
+  const svcRows = services.map(sv => {
     const c = clientById(sv.clientId);
-    let rowTotal = 0;
+    let rowTotal = 0, rowPend = 0;
     const cells = cols.map((period, i) => {
       if (period < sv.startPeriod) return `<td class="inactive">·</td>`;
       const ch = mensualidadFor(sv.id, period);
@@ -233,28 +241,39 @@ function renderMensualidades() {
           // El dinero se acredita al mes en que realmente cayó (paidIn)
           const ci = colIndex[ch.paidIn || ch.period];
           if (ci !== undefined) { monthTotals[ci] += ch.amount; rowTotal += ch.amount; }
-        } else mpMens[i] += ch.amount;
+        } else { mpMens[i] += ch.amount; rowPend += ch.amount; }
         const tip = adv ? `Cobrado en ${periodLabel(ch.paidIn)}` : STATUS_LABEL[st];
         return `<td class="cell"><span class="matrix-cell ${st}${adv ? " anticipado" : ""} clickable" data-cell="${sv.id}|${period}" title="${tip} · ${fmt(ch.amount)}">${fmt(ch.amount)}</span></td>`;
       }
       const exp = expectedAmount(sv, period);
-      mpMens[i] += exp;
+      mpMens[i] += exp; rowPend += exp;
       const cls = period <= now ? "pendiente" : "pendiente futura";
       return `<td class="cell"><span class="matrix-cell ${cls} clickable" data-cell="${sv.id}|${period}" title="Esperada · clic para registrar como pagado">${fmt(exp)}</span></td>`;
     }).join("");
-    return `<tr><td class="client-col">${c ? clientTag(c) : ""} <strong>${esc(sv.name)}</strong></td>
-      <td class="qarrow"></td>${cells}<td class="qarrow"></td><td class="num"><strong>${fmt(rowTotal)}</strong></td></tr>`;
-  }).join("");
+    return { sv, c, rowTotal, rowPend, cells };
+  });
 
-  // Tarjetas: rango elegido (1/3/6 meses) anclado al inicio de la vista
-  const rEnd = shiftPeriod(qs, (ui.cardRange || 3) - 1);
-  const inR = p => p >= qs && p <= rEnd;
-  const rangeLabel = ui.cardRange === 1 ? periodLabel(qs)
+  // Ordenamiento por encabezado: nombre (az/za), cobrado (pagados arriba) o deuda (deudores arriba)
+  if (ui.sort === "name-asc") svcRows.sort((a, b) => (a.sv.name + (a.c?.name || "")).localeCompare(b.sv.name + (b.c?.name || ""), "es"));
+  else if (ui.sort === "name-desc") svcRows.sort((a, b) => (b.sv.name + (b.c?.name || "")).localeCompare(a.sv.name + (a.c?.name || ""), "es"));
+  else if (ui.sort === "paid") svcRows.sort((a, b) => b.rowTotal - a.rowTotal);
+  else if (ui.sort === "pend") svcRows.sort((a, b) => b.rowPend - a.rowPend);
+
+  const rows = svcRows.map(({ sv, c, rowTotal, cells }) =>
+    `<tr><td class="client-col">${c ? clientTag(c) : ""} <strong>${esc(sv.name)}</strong></td>
+      <td class="qarrow"></td>${cells}<td class="qarrow"></td><td class="num"><strong>${fmt(rowTotal)}</strong></td></tr>`
+  ).join("");
+
+  // Tarjetas: rango elegido (mes seleccionado / trimestre / semestre)
+  const rStart = ui.cardRange === 1 ? ui.selMonth : qs;
+  const rEnd = ui.cardRange === 1 ? ui.selMonth : shiftPeriod(qs, (ui.cardRange || 3) - 1);
+  const inR = p => p >= rStart && p <= rEnd;
+  const rangeLabel = ui.cardRange === 1 ? periodLabel(ui.selMonth)
     : ui.cardRange === 6 ? `${periodLabel(qs)} – ${periodLabel(rEnd)}`
     : quarterLabel(qs);
   const esperado = state.charges.concat(virtualPendings(rEnd));
   const cobradoQ = state.charges.filter(p => p.status === "pagado" && inR(p.paidIn || p.period)).reduce((s, p) => s + p.amount, 0);
-  const adeudos = esperado.filter(p => p.status === "pendiente" && p.period < qs);
+  const adeudos = esperado.filter(p => p.status === "pendiente" && p.period < rStart);
   const adeudosTot = adeudos.reduce((s, p) => s + p.amount, 0);
 
   // Filas de cargos únicos: pagado -> su mes; pendiente -> rueda al mes vigente (o al último del trimestre)
@@ -284,6 +303,10 @@ function renderMensualidades() {
   const pendTotalQ = runPend + mpCargo.reduce((a, b) => a + b, 0);  // pie: siempre el trimestre
   const porCobrarQ = esperado.filter(p => p.status === "pendiente" && inR(p.period)).reduce((s, p) => s + p.amount, 0);
 
+  // FLIP: capturar posición del badge antes de re-render para animarlo al nuevo mes
+  const prevBadgeEl = view.querySelector(".month-badge");
+  const prevBadgeRect = prevBadgeEl ? prevBadgeEl.getBoundingClientRect() : null;
+
   view.innerHTML = `
     <div class="toolbar">
       <button class="btn btn-ghost btn-small" id="year-prev">← ${yearOf(qs) - 1}</button>
@@ -304,7 +327,7 @@ function renderMensualidades() {
       <div class="card red"><div class="label">Adeudos anteriores</div><div class="value">${fmt(adeudosTot)}</div><div class="hint">${adeudos.length} adeudo(s) arrastrado(s)</div></div>
     </div>
     <div class="table-wrap"><table class="matrix">
-      <thead><tr><th class="client-col">Servicio / cargo</th><th class="qnav"><button class="btn btn-ghost q-arrow" id="q-prev" title="Trimestre anterior">‹</button></th>${cols.map(p => `<th style="text-align:center">${MONTHS[monthOf(p) - 1]}</th>`).join("")}<th class="qnav"><button class="btn btn-ghost q-arrow" id="q-next" title="Siguiente trimestre">›</button></th><th class="num">Cobrado</th></tr></thead>
+      <thead><tr><th class="client-col sortable" id="sort-name" title="Ordenar por nombre">Servicio / cargo ${ui.sort === "name-asc" ? "▲" : ui.sort === "name-desc" ? "▼" : ""}</th><th class="qnav"><button class="btn btn-ghost q-arrow" id="q-prev" title="Trimestre anterior">‹</button></th>${cols.map(p => `<th class="month-th${p < now ? " past" : ""}" data-month="${p}" style="text-align:center" title="${p < now ? "Mes pasado" : "Ver tarjetas de " + periodLabel(p)}">${MONTHS[monthOf(p) - 1]}${ui.cardRange === 1 && p === ui.selMonth ? `<span class="month-badge"></span>` : ""}</th>`).join("")}<th class="qnav"><button class="btn btn-ghost q-arrow" id="q-next" title="Siguiente trimestre">›</button></th><th class="num sortable" id="sort-total" title="Ordenar por cobrado / adeudo">Cobrado ${ui.sort === "paid" ? "▼" : ui.sort === "pend" ? "▲" : ""}</th></tr></thead>
       <tbody>${rows + cargoRows || `<tr><td colspan="7" class="empty-state">Sin servicios ni cargos.</td></tr>`}</tbody>
       <tfoot>
         <tr><td class="client-col"><strong>Cobrado</strong></td><td class="qarrow"></td>${monthTotals.map(t => `<td class="cell muted">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td><td class="num"><strong>${fmt(monthTotals.reduce((a, b) => a + b, 0))}</strong></td></tr>
@@ -318,7 +341,35 @@ function renderMensualidades() {
   document.getElementById("year-prev").onclick = () => { ui.qStart = shiftPeriod(qs, -12); render(); };
   document.getElementById("year-next").onclick = () => { ui.qStart = shiftPeriod(qs, 12); render(); };
   document.getElementById("q-today")?.addEventListener("click", () => { ui.qStart = quarterStart(); render(); });
+  // Animar el badge desde su posición anterior hacia el mes elegido
+  const newBadgeEl = view.querySelector(".month-badge");
+  if (prevBadgeRect && newBadgeEl) {
+    const r = newBadgeEl.getBoundingClientRect();
+    const dx = prevBadgeRect.left - r.left;
+    if (Math.abs(dx) > 1) newBadgeEl.animate(
+      [{ transform: `translateX(${dx}px)` }, { transform: "none" }],
+      { duration: 320, easing: "cubic-bezier(.22,.9,.3,1)" }
+    );
+  }
+
+  // Clic en el encabezado de un mes (vigente o futuro) -> tarjetas de ese mes
+  view.querySelectorAll(".month-th").forEach(th => th.onclick = () => {
+    if (th.dataset.month < now) return;   // meses pasados no seleccionables
+    ui.selMonth = th.dataset.month;
+    ui.cardRange = 1;
+    render();
+  });
+
   view.querySelectorAll(".range-btn").forEach(b => b.onclick = () => { ui.cardRange = +b.dataset.range; render(); });
+  // Orden: clic en "Servicio / cargo" cicla A→Z / Z→A / normal; en "Cobrado" cicla pagados↑ / deudores↑ / normal
+  document.getElementById("sort-name").onclick = () => {
+    ui.sort = ui.sort === "name-asc" ? "name-desc" : ui.sort === "name-desc" ? null : "name-asc";
+    render();
+  };
+  document.getElementById("sort-total").onclick = () => {
+    ui.sort = ui.sort === "paid" ? "pend" : ui.sort === "pend" ? null : "paid";
+    render();
+  };
   document.getElementById("btn-new").onclick = () => openPaymentModal(null, {});
   document.getElementById("btn-new-client").onclick = openClientModal;
 
@@ -530,6 +581,9 @@ function openPaymentModal(charge, defaults = {}) {
 
   document.getElementById("modal-title").textContent = charge ? "Editar cobro" : "Nuevo cobro";
   document.getElementById("btn-delete-payment").hidden = !charge;
+  const kindNow = charge?.kind || defaults.kind || "mensualidad";
+  const svcIdNow = charge?.serviceId || defaults.serviceId || "";
+  document.getElementById("btn-delete-service").hidden = !(kindNow === "mensualidad" && svcIdNow);
 
   document.getElementById("f-id").value = charge?.id || "";
   cSel.value = charge?.clientId || defaults.clientId || state.clients[0]?.id;
@@ -592,6 +646,18 @@ document.getElementById("btn-delete-payment").onclick = () => {
   const id = document.getElementById("f-id").value;
   if (!id || !confirm("¿Eliminar este cobro?")) return;
   state.charges = state.charges.filter(p => p.id !== id);
+  save(); closeModal(); render();
+};
+
+// Eliminar el SERVICIO entero (no solo un mes): quita la iguala y sus cobros
+document.getElementById("btn-delete-service").onclick = () => {
+  const sid = document.getElementById("f-service").value || state.charges.find(p => p.id === document.getElementById("f-id").value)?.serviceId;
+  const sv = serviceById(sid);
+  if (!sv) return;
+  const n = state.charges.filter(p => p.serviceId === sv.id).length;
+  if (!confirm(`¿Eliminar el servicio "${sv.name}" y sus ${n} cobro(s)?`)) return;
+  state.services = state.services.filter(s => s.id !== sv.id);
+  state.charges = state.charges.filter(p => p.serviceId !== sv.id);
   save(); closeModal(); render();
 };
 
@@ -797,6 +863,9 @@ async function bootSync() {
       state = remote;
       localStorage.setItem(LS_KEY, JSON.stringify(state));
       render();
+    } else {
+      // Local más reciente que la nube: subir para que ambos dispositivos converjan
+      await remoteSave(state);
     }
     setSync("ok");
   } catch (e) {

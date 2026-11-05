@@ -147,6 +147,25 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   padding-top: 10px;
 }
 .matrix tfoot td { font-size: 12px; }
+.matrix th.sortable { cursor: pointer; user-select: none; }
+.matrix th.sortable:hover { color: var(--text); }
+.matrix th.month-th { cursor: pointer; user-select: none; }
+.matrix th.month-th:hover { color: var(--text); }
+.matrix th.month-th.past { opacity: .4; cursor: default; }
+.matrix th.month-th.past:hover { color: var(--muted); }
+.month-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 7px;
+  border-radius: 99px;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .06em;
+  color: #0b0e14;
+  background: var(--accent);
+  vertical-align: middle;
+}
+.month-badge::before { content: "● "; font-size: 7px; }
 .matrix th.qnav, .matrix td.qarrow { padding: 4px; text-align: center; width: 30px; }
 .q-arrow { padding: 2px 9px; font-weight: 700; font-size: 15px; line-height: 1; }
 
