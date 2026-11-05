@@ -151,8 +151,8 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
 .matrix th.sortable:hover { color: var(--text); }
 .matrix th.month-th { cursor: pointer; user-select: none; }
 .matrix th.month-th:hover { color: var(--text); }
-.matrix th.month-th.past { opacity: .4; cursor: default; }
-.matrix th.month-th.past:hover { color: var(--muted); }
+.matrix th.month-th.past { opacity: .55; }
+.matrix th.month-th.past:hover { opacity: 1; color: var(--text); }
 .month-badge {
   display: inline-block;
   margin-left: 6px;

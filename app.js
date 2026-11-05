@@ -210,9 +210,8 @@ function renderMensualidades() {
   const qEnd = shiftPeriod(qs, 2);
   const cols = [qs, shiftPeriod(qs, 1), qEnd];
   const colIndex = Object.fromEntries(cols.map((p, i) => [p, i]));
-  // Mes seleccionado para tarjetas: si el trimestre contiene el mes vigente, no bajar de ahí
-  if (!ui.selMonth || ui.selMonth < qs || ui.selMonth > qEnd
-      || (now >= qs && now <= qEnd && ui.selMonth < now)) {
+  // Mes seleccionado para tarjetas: vigente por defecto dentro del trimestre visible
+  if (!ui.selMonth || ui.selMonth < qs || ui.selMonth > qEnd) {
     ui.selMonth = (now >= qs && now <= qEnd) ? now : qs;
   }
 
@@ -327,7 +326,7 @@ function renderMensualidades() {
       <div class="card red"><div class="label">Adeudos anteriores</div><div class="value">${fmt(adeudosTot)}</div><div class="hint">${adeudos.length} adeudo(s) arrastrado(s)</div></div>
     </div>
     <div class="table-wrap"><table class="matrix">
-      <thead><tr><th class="client-col sortable" id="sort-name" title="Ordenar por nombre">Servicio / cargo ${ui.sort === "name-asc" ? "▲" : ui.sort === "name-desc" ? "▼" : ""}</th><th class="qnav"><button class="btn btn-ghost q-arrow" id="q-prev" title="Trimestre anterior">‹</button></th>${cols.map(p => `<th class="month-th${p < now ? " past" : ""}" data-month="${p}" style="text-align:center" title="${p < now ? "Mes pasado" : "Ver tarjetas de " + periodLabel(p)}">${MONTHS[monthOf(p) - 1]}${ui.cardRange === 1 && p === ui.selMonth ? `<span class="month-badge"></span>` : ""}</th>`).join("")}<th class="qnav"><button class="btn btn-ghost q-arrow" id="q-next" title="Siguiente trimestre">›</button></th><th class="num sortable" id="sort-total" title="Ordenar por cobrado / adeudo">Cobrado ${ui.sort === "paid" ? "▼" : ui.sort === "pend" ? "▲" : ""}</th></tr></thead>
+      <thead><tr><th class="client-col sortable" id="sort-name" title="Ordenar por nombre">Servicio / cargo ${ui.sort === "name-asc" ? "▲" : ui.sort === "name-desc" ? "▼" : ""}</th><th class="qnav"><button class="btn btn-ghost q-arrow" id="q-prev" title="Trimestre anterior">‹</button></th>${cols.map(p => `<th class="month-th${p < now ? " past" : ""}" data-month="${p}" style="text-align:center" title="Ver tarjetas de ${periodLabel(p)}">${MONTHS[monthOf(p) - 1]}${ui.cardRange === 1 && p === ui.selMonth ? `<span class="month-badge"></span>` : ""}</th>`).join("")}<th class="qnav"><button class="btn btn-ghost q-arrow" id="q-next" title="Siguiente trimestre">›</button></th><th class="num sortable" id="sort-total" title="Ordenar por cobrado / adeudo">Cobrado ${ui.sort === "paid" ? "▼" : ui.sort === "pend" ? "▲" : ""}</th></tr></thead>
       <tbody>${rows + cargoRows || `<tr><td colspan="7" class="empty-state">Sin servicios ni cargos.</td></tr>`}</tbody>
       <tfoot>
         <tr><td class="client-col"><strong>Cobrado</strong></td><td class="qarrow"></td>${monthTotals.map(t => `<td class="cell muted">${t ? fmt(t) : ""}</td>`).join("")}<td class="qarrow"></td><td class="num"><strong>${fmt(monthTotals.reduce((a, b) => a + b, 0))}</strong></td></tr>
@@ -352,9 +351,8 @@ function renderMensualidades() {
     );
   }
 
-  // Clic en el encabezado de un mes (vigente o futuro) -> tarjetas de ese mes
+  // Clic en el encabezado de cualquier mes -> tarjetas de ese mes
   view.querySelectorAll(".month-th").forEach(th => th.onclick = () => {
-    if (th.dataset.month < now) return;   // meses pasados no seleccionables
     ui.selMonth = th.dataset.month;
     ui.cardRange = 1;
     render();
